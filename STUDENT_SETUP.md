@@ -25,18 +25,3 @@ Both guides will walk you through installing:
 5. **Claude Code (Cline)** - AI coding assistant with OpenRouter
 
 **Time Required**: 30-45 minutes
-
----
-
-## Need Help?
-
-If you encounter issues during setup:
-
-1. **Course Slack** - Post in #tech-help channel
-2. **Office Hours** - Bring your laptop for hands-on help
-3. **Week 1 Class** - We'll dedicate time for troubleshooting
-4. **GitHub Issues** - Report bugs in course materials
-
----
-
-**Ready to get started? Click on your operating system above!**
