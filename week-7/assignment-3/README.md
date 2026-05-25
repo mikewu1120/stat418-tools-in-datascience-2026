@@ -137,9 +137,7 @@ gcloud run deploy mtcars-fastapi \
   --port 8080
 ```
 
-**Deployed API URL:** `https://YOUR-SERVICE-URL.run.app`
-
-Replace this URL after deploying to Cloud Run.
+**Deployed API URL:** `https://mtcars-fastapi-854033632163.us-central1.run.app`
 
 ## Configuration
 
