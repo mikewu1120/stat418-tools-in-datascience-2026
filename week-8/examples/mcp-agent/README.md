@@ -1,270 +1,236 @@
 # MCP-Powered Agent
 
-An AI agent that connects to MCP (Model Context Protocol) servers to dynamically discover and use tools.
+A runnable example of an LLM agent using a real FastMCP server, the Python MCP client library, and OpenRouter tool-calling.
 
 ## Overview
 
 This example demonstrates:
-- Connecting to MCP servers
-- Dynamic tool discovery
-- Using multiple MCP tools
-- Handling tool responses
-- Integration with Claude Desktop
+- defining tools with FastMCP
+- exposing those tools through a real MCP server over stdio
+- discovering tools dynamically with the Python `mcp` client library
+- using OpenRouter with the NVIDIA Nemotron free model by default
+- combining local tools and external APIs in an MCP workflow
+- interactive CLI usage for demos and experimentation
+- a persistent MCP session in interactive mode
+- verbose trace output showing the MCP tool calls made by the agent
 
 ## Files
 
-- `mcp_agent.py` - Agent with MCP integration
-- `mcp_server.py` - Example MCP server implementation
-- `config.json` - MCP server configuration
+- `mcp_server.py` - FastMCP server that exposes demo tools
+- `mcp_agent.py` - LLM-driven MCP client agent using `ClientSession`
+- `llm_client.py` - OpenRouter chat completion helper
+- `config.json` - example MCP client configuration
 - `requirements.txt` - Python dependencies
 
 ## Setup
 
 ```bash
-# Install dependencies
-uv pip install google-generativeai mcp
-# OR
-uv pip install openai mcp  # for OpenRouter
-
-# Set your API key (use free tier)
-export GOOGLE_API_KEY="your-free-gemini-key"
-# OR
-export OPENROUTER_API_KEY="your-free-openrouter-key"
+uv venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
 ```
 
-**Note**: This example uses free-tier APIs from Google (Gemini) or OpenRouter. MCP works with any LLM provider.
+Set your OpenRouter API key before running the agent:
+
+```bash
+export OPENROUTER_API_KEY=your_key_here
+```
+
+Optional model override:
+
+```bash
+export OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
+```
+
+If you do not set `OPENROUTER_MODEL`, the code already defaults to the NVIDIA Nemotron model above.
 
 ## Running the MCP Server
 
+You can run the FastMCP server directly:
+
 ```bash
-# Start the MCP server
 python mcp_server.py
 ```
 
 The server exposes these tools:
-- `search_database` - Search a product database
-- `get_user_info` - Get user information
-- `send_notification` - Send notifications
+- `search_database`
+- `get_user_info`
+- `get_weather`
+- `send_notification`
 
 ## Running the Agent
 
+The agent launches the MCP server over stdio, initializes an MCP session, discovers the available tools, and lets the LLM decide when to call them.
+
+Behavior differs slightly by mode:
+- one-shot mode starts a temporary MCP server/session, runs the request, and exits
+- interactive mode starts one MCP server/session and keeps it alive across turns
+- interactive mode also preserves conversation context until you type `clear`
+
 ```bash
-# Run the agent (connects to MCP server)
+# Run the default demo task
 python mcp_agent.py
+
+# Run a one-off custom task
+python mcp_agent.py --task "Look up alice, check the weather in her city, and send her a short notification."
+
+# Show the MCP tool trace
+python mcp_agent.py --task "Look up bob and summarize his account." --verbose
+
+# Start an interactive CLI loop with one persistent MCP session
+python mcp_agent.py --interactive
+
+# Interactive mode with verbose MCP tool traces
+python mcp_agent.py --interactive --verbose
 ```
 
-## Claude Desktop Integration
+The default task:
+- looks up `alice`
+- summarizes her account
+- sends a notification
 
-To use this MCP server with Claude Desktop:
+## Example Interaction
 
-1. Edit Claude Desktop config:
-```bash
-# macOS
-nano ~/Library/Application\ Support/Claude/claude_desktop_config.json
+### One-shot run
 
-# Windows
-notepad %APPDATA%\Claude\claude_desktop_config.json
+```text
+$ python mcp_agent.py --task "Look up alice, check the weather in her city, and send her a short notification." --verbose
+
+Tool: get_user_info
+Arguments: {"username": "alice"}
+Result: {"name": "Alice", "plan": "premium", "email": "alice@example.com", "city": "Los Angeles"}
+
+Tool: get_weather
+Arguments: {"city": "Los Angeles"}
+Result: {"city": "Los Angeles", "temperature_f": 68.2, "wind_speed_mph": 6.4, "conditions": "mainly clear"}
+
+Tool: send_notification
+Arguments: {"username": "alice", "message": "Hi Alice, it's currently mainly clear and 68.2°F in Los Angeles."}
+Result: {"status": "sent", "username": "alice", "message": "Hi Alice, it's currently mainly clear and 68.2°F in Los Angeles.", "delivery_target": "alice@example.com"}
+
+Final Answer: I looked up Alice, checked the current weather in Los Angeles, and sent her a short notification with the update.
 ```
 
-2. Add your MCP server:
+### Interactive mode
+
+```text
+$ python mcp_agent.py --interactive
+MCP agent interactive mode. Type 'exit' or 'quit' to stop. Type 'clear' to reset context.
+
+Task> look up bob and summarize his account
+Final Answer: Bob is a free-tier user based in San Francisco.
+
+Task> check the weather in his city too
+Final Answer: San Francisco is currently cool with light wind.
+
+Task> clear
+Context cleared.
+
+Task> check the weather in his city too
+Final Answer: I need to know which person you mean before I can check the weather in their city.
+
+Task> quit
+Exiting.
+```
+
+## Config File
+
+`config.json` shows the same server registration pattern many MCP hosts use:
+
 ```json
 {
   "mcpServers": {
-    "my-tools": {
+    "demo-tools": {
       "command": "python",
-      "args": ["-m", "mcp_server"],
-      "env": {
-        "DATABASE_URL": "sqlite:///data.db"
-      }
+      "args": ["mcp_server.py"],
+      "cwd": "."
     }
   }
 }
 ```
 
-3. Restart Claude Desktop
+## FastMCP Server Design
 
-4. Tools will be automatically available in conversations
-
-## MCP Server Implementation
+The server uses the `@mcp.tool` decorator to publish discoverable tool interfaces:
 
 ```python
-from mcp.server import Server
-from mcp.types import Tool, TextContent
+from fastmcp import FastMCP
 
-server = Server("my-tools")
+mcp = FastMCP("demo-tools")
 
-@server.list_tools()
-async def list_tools() -> list[Tool]:
-    return [
-        Tool(
-            name="search_database",
-            description="Search the product database",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "limit": {"type": "integer", "default": 10}
-                },
-                "required": ["query"]
-            }
-        )
-    ]
-
-@server.call_tool()
-async def call_tool(name: str, arguments: dict):
-    if name == "search_database":
-        results = await search_db(arguments["query"], arguments.get("limit", 10))
-        return [TextContent(type="text", text=json.dumps(results))]
-    
-    raise ValueError(f"Unknown tool: {name}")
+@mcp.tool
+def get_user_info(username: str) -> dict:
+    ...
 ```
 
-## Agent Implementation
+The tool layer includes:
+- a small in-memory product database
+- demo user account data
+- live weather lookup through Open-Meteo
+- a notification action that returns structured delivery metadata
 
-```python
-import anthropic
-from mcp.client import Client
+## MCP Client Design
 
-# Connect to MCP server
-mcp_client = Client("http://localhost:8000")
+The agent uses the actual Python MCP client library:
 
-# Discover available tools
-tools = await mcp_client.list_tools()
+- `StdioServerParameters`
+- `stdio_client(...)`
+- `ClientSession(...)`
+- `session.initialize()`
+- `session.list_tools()`
+- `session.call_tool(...)`
 
-# Create agent with MCP tools
-client = anthropic.Anthropic()
+That means the example is not pretending to be MCP-compatible. It is using the real protocol client flow.
 
-def run_agent(task: str):
-    messages = [{"role": "user", "content": task}]
-    
-    while True:
-        response = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
-            max_tokens=4096,
-            tools=tools,
-            messages=messages
-        )
-        
-        if response.stop_reason == "end_turn":
-            return response.content[0].text
-        
-        # Execute MCP tool calls
-        for tool_use in response.content:
-            if tool_use.type == "tool_use":
-                result = await mcp_client.call_tool(
-                    tool_use.name,
-                    tool_use.input
-                )
-                messages.append({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": tool_use.id,
-                        "content": result
-                    }]
-                })
+## Why the CLI Mode Helps
+
+The CLI makes the example easier to teach and explore because you can:
+- run a single structured request with `--task`
+- demonstrate actual MCP tool traffic with `--verbose`
+- run multiple prompts in a row with `--interactive`
+- preserve context across interactive turns
+- reset the conversation deliberately with `clear`
+- compare the same MCP server behavior across different user requests without editing source code
+
+## Example Workflow
+
+A representative multi-step request is:
+
+```text
+Look up alice, check the weather in her city, and send her a short notification.
 ```
 
-## Key Concepts
+A typical execution path is:
+1. the LLM sees the available MCP tool schemas
+2. it calls `get_user_info`
+3. it calls `get_weather` with the returned city
+4. it calls `send_notification`
+5. it produces a final answer summarizing the completed workflow
 
-### Tool Discovery
+## Why This Example Is Better Than the Earlier Version
 
-MCP servers expose their tools through a standard interface:
+This version now includes:
+- a real external LLM API
+- actual tool-calling
+- a real MCP client session
+- a real MCP server
+- a real external weather API
 
-```python
-# Agent automatically discovers tools
-tools = await mcp_client.list_tools()
-
-# Tools include name, description, and schema
-for tool in tools:
-    print(f"{tool.name}: {tool.description}")
-```
-
-### Tool Execution
-
-The agent calls tools through the MCP protocol:
-
-```python
-# Agent decides to use a tool
-result = await mcp_client.call_tool(
-    name="search_database",
-    arguments={"query": "laptop", "limit": 5}
-)
-
-# Result is returned to the agent
-```
-
-### Error Handling
-
-Handle MCP connection and tool errors:
-
-```python
-try:
-    result = await mcp_client.call_tool(name, args)
-except MCPConnectionError:
-    # MCP server is down
-    logger.error("MCP server unavailable")
-except MCPToolError as e:
-    # Tool execution failed
-    logger.error(f"Tool failed: {e}")
-```
-
-## Multiple MCP Servers
-
-Connect to multiple MCP servers:
-
-```python
-# Connect to multiple servers
-database_tools = await Client("http://localhost:8000").list_tools()
-api_tools = await Client("http://localhost:8001").list_tools()
-
-# Combine tools
-all_tools = database_tools + api_tools
-
-# Agent can use tools from all servers
-response = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    tools=all_tools,
-    messages=messages
-)
-```
-
-## Security Considerations
-
-- **Authentication**: Use API keys for MCP servers
-- **Authorization**: Validate tool access per user
-- **Input validation**: Sanitize all tool inputs
-- **Rate limiting**: Prevent abuse of MCP tools
-- **Logging**: Log all tool calls for audit
-
-## Testing
-
-Test MCP integration:
-
-```python
-def test_mcp_connection():
-    """Test connection to MCP server"""
-    client = Client("http://localhost:8000")
-    tools = await client.list_tools()
-    assert len(tools) > 0
-
-def test_tool_execution():
-    """Test tool execution through MCP"""
-    client = Client("http://localhost:8000")
-    result = await client.call_tool("search_database", {"query": "test"})
-    assert result is not None
-```
+That makes it much closer to how production agent systems are structured.
 
 ## Common Issues
 
-**MCP server not found**: Check server is running and URL is correct
-**Tool not available**: Verify tool is registered in MCP server
-**Authentication failed**: Check API keys and credentials
-**Timeout errors**: Increase timeout or optimize tool execution
+**`fastmcp` or `mcp` import error**: install dependencies with `uv pip install -r requirements.txt` or sync the workspace environment so the editor can resolve those packages
 
-## Next Steps
+**`OPENROUTER_API_KEY is not set`**: export the environment variable before running the agent
 
-- Add authentication to your MCP server
-- Implement more complex tools
-- Deploy MCP server to production
-- Monitor tool usage and performance
+**Unknown user**: use `alice` or `bob` in demo prompts unless you extend `USERS`
+
+**Weather lookup failed**: the Open-Meteo geocoding request may fail if the city is misspelled or the network is unavailable
+
+**Server/client confusion**: `mcp_server.py` defines the tools and can be run directly, but `mcp_agent.py` also starts that server internally over stdio for the MCP session. In interactive mode it now keeps that same session alive until you exit.
+
+**Follow-up prompts stopped making sense**: if you typed `clear`, context was intentionally reset. After a reset, underspecified follow-ups like "his city" should trigger a clarification question instead of guessing.
+
+**Want to inspect what happened**: rerun with `--verbose` to see the MCP tool calls, arguments, and returned results
+
