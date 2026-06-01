@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import joblib
 import pandas as pd
 import streamlit as st
@@ -7,8 +9,10 @@ st.set_page_config(
     layout="wide"
 )
 
-model = joblib.load("ikea_interest_model.pkl")
-data = pd.read_csv("ikea_model_dataset.csv")
+BASE_DIR = Path(__file__).parent
+
+model = joblib.load(BASE_DIR / "ikea_interest_model.pkl")
+data = pd.read_csv(BASE_DIR / "ikea_model_dataset.csv")
 
 st.title("Furniture Product Launch Advisor")
 
