@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, confusion_matrix, ConfusionMatrixDisplay
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
@@ -118,6 +118,20 @@ plt.title("Top Random Forest Feature Importances")
 plt.xlabel("Importance")
 plt.tight_layout()
 plt.savefig("feature_importance.png")
+plt.close()
+# confusion matrix for Random Forest
+rf_preds = rf_pipeline.predict(X_test)
+cm = confusion_matrix(y_test, rf_preds)
+
+disp = ConfusionMatrixDisplay(
+    confusion_matrix=cm,
+    display_labels=["Low Interest", "High Interest"]
+)
+
+disp.plot()
+plt.title("Random Forest Confusion Matrix")
+plt.tight_layout()
+plt.savefig("confusion_matrix.png")
 plt.close()
 
 print("saved model, results, and charts")
