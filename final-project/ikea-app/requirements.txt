@@ -6,3 +6,5 @@ matplotlib
 beautifulsoup4
 lxml
 requests
+fastapi
+uvicorn
