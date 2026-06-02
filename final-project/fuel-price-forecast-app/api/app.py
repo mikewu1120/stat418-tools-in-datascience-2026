@@ -29,7 +29,6 @@ from app_lib.models import run_forecast  # noqa: E402
 from app_lib.pipeline import (  # noqa: E402
     EIA_LINKS,
     collect_from_eia,
-    run_full_pipeline,
     train_models,
 )
 
@@ -67,6 +66,7 @@ def index():
                 "metadata": "GET /metadata",
                 "predict": "POST /predict with JSON {'horizon': 8, 'method': 'xgboost'}",
                 "data_sources": "GET /data/sources",
+                "data_history": "GET /data/history",
             },
             "example_predict": {
                 "url": "/predict",
@@ -113,11 +113,32 @@ def data_collect():
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 
+@app.get("/data/history")
+def data_history():
+    """Return the historical gasoline series used by the API."""
+    try:
+        raw = load_raw_prices(get_raw_path())
+        rows = [
+            {"period": str(row.period.date()), "price": float(row.price)}
+            for row in raw.itertuples(index=False)
+        ]
+        return jsonify(
+            {
+                "ok": True,
+                "last_data_period": rows[-1]["period"] if rows else None,
+                "n_rows": len(rows),
+                "series": rows,
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 @app.post("/models/train")
 def models_train():
-    """Retrain XGBoost and SARIMA on the current CSV."""
+    """Retrain the fast deployed model on the current CSV."""
     try:
-        result = train_models(get_raw_path())
+        result = train_models(get_raw_path(), include_sarima=False)
         clear_metadata_cache()
         return jsonify({"ok": True, **result})
     except Exception as exc:  # noqa: BLE001
@@ -126,11 +147,18 @@ def models_train():
 
 @app.post("/pipeline/run")
 def pipeline_run():
-    """One-click: fetch from EIA (if key set) then retrain both models."""
+    """One-click: fetch from EIA (if key set) then retrain the fast deployed model."""
     try:
         payload = request.get_json(silent=True) or {}
         require_key = bool(payload.get("require_eia_key", True))
-        result = run_full_pipeline(require_eia_key=require_key)
+        collect_result = collect_from_eia(get_raw_path(), require_key=require_key)
+        train_result = train_models(get_raw_path(), include_sarima=False)
+        result = {
+            "ok": True,
+            "collect": collect_result,
+            "train": train_result,
+            "message": collect_result["message"] + " " + train_result["message"],
+        }
         clear_metadata_cache()
         return jsonify(result)
     except Exception as exc:  # noqa: BLE001

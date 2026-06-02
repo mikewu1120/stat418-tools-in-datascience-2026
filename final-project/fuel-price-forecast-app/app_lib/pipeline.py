@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 
 import numpy as np
@@ -16,8 +17,10 @@ from app_lib.config import (
     METADATA_PATH,
     MODELING_CSV,
     RAW_GAS_CSV,
+    XGBOOST_MODEL_PATH,
 )
-from app_lib.models import train_all
+from app_lib.features import FEATURE_COLUMNS, load_raw_prices, modeling_frame
+from app_lib.models import train_all, train_xgboost
 
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
@@ -132,22 +135,53 @@ def train_models(
     raw_csv: Path | None = None,
     modeling_csv: Path | None = None,
     metadata_path: Path | None = None,
+    *,
+    include_sarima: bool = True,
 ) -> dict:
     raw_csv = raw_csv or RAW_GAS_CSV
+    modeling_csv = modeling_csv or MODELING_CSV
+    metadata_path = metadata_path or METADATA_PATH
     if not raw_csv.exists():
         raise FileNotFoundError(f"Missing {raw_csv}. Run data collection first.")
-    meta = train_all(raw_csv, modeling_csv or MODELING_CSV, metadata_path or METADATA_PATH)
+    if include_sarima:
+        meta = train_all(raw_csv, modeling_csv, metadata_path)
+        message = "Models retrained on latest data."
+    else:
+        raw = load_raw_prices(raw_csv)
+        modeling_csv.parent.mkdir(parents=True, exist_ok=True)
+        modeling_frame(raw).to_csv(modeling_csv, index=False)
+        xgb_meta = train_xgboost(raw_csv, XGBOOST_MODEL_PATH)
+        previous = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.exists() else {}
+        meta = {
+            "last_data_period": raw["period"].iloc[-1].strftime("%Y-%m-%d"),
+            "feature_columns": FEATURE_COLUMNS,
+            "models": {
+                "xgboost": xgb_meta,
+            },
+        }
+        sarima_meta = previous.get("models", {}).get("sarima")
+        if sarima_meta:
+            meta["models"]["sarima"] = sarima_meta
+        metadata_path.parent.mkdir(parents=True, exist_ok=True)
+        metadata_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        message = "XGBoost retrained on latest data. SARIMA kept as the packaged comparison model for deployment speed."
     return {
-        "message": "Models retrained on latest data.",
+        "message": message,
         "last_data_period": meta["last_data_period"],
         "models": meta["models"],
     }
 
 
-def run_full_pipeline(*, require_eia_key: bool = True) -> dict:
+def run_full_pipeline(
+    *,
+    require_eia_key: bool = True,
+    raw_csv: Path | None = None,
+    modeling_csv: Path | None = None,
+    metadata_path: Path | None = None,
+) -> dict:
     """Fetch EIA data then retrain XGBoost + SARIMA."""
-    collect_result = collect_from_eia(require_key=require_eia_key)
-    train_result = train_models()
+    collect_result = collect_from_eia(raw_csv, require_key=require_eia_key)
+    train_result = train_models(raw_csv, modeling_csv, metadata_path)
     return {
         "ok": True,
         "collect": collect_result,

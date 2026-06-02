@@ -128,6 +128,49 @@ def _build_history_figure(
     return fig
 
 
+def _load_api_history(api_url: str) -> pd.DataFrame:
+    resp = requests.get(f"{api_url.rstrip('/')}/data/history", timeout=60)
+    resp.raise_for_status()
+    payload = resp.json()
+    if not payload.get("ok", True) and payload.get("error"):
+        raise RuntimeError(payload["error"])
+    raw = pd.DataFrame(payload["series"])
+    raw["period"] = pd.to_datetime(raw["period"])
+    raw["price"] = raw["price"].astype(float)
+    return raw.sort_values("period").reset_index(drop=True)
+
+
+def _load_api_metadata(api_url: str) -> dict:
+    resp = requests.get(f"{api_url.rstrip('/')}/metadata", timeout=60)
+    resp.raise_for_status()
+    payload = resp.json()
+    if payload.get("error"):
+        raise RuntimeError(payload["error"])
+    return payload
+
+
+def _load_local_metadata() -> dict:
+    meta_path = ROOT / "models" / "metadata.json"
+    if not meta_path.exists():
+        return {}
+    return json.loads(meta_path.read_text(encoding="utf-8"))
+
+
+def _load_display_history(api_url: str) -> tuple[pd.DataFrame, str]:
+    try:
+        return _load_api_history(api_url), "Flask API"
+    except Exception as exc:  # noqa: BLE001
+        st.warning(f"Could not load history from Flask API, falling back to local CSV: {exc}")
+
+    if not RAW_GAS_CSV.exists():
+        st.warning(
+            "No local price file yet. Use **Fetch EIA data & retrain models** in the sidebar "
+            "(requires `EIA_API_KEY` in `.env` and the Flask API running)."
+        )
+        st.stop()
+    return load_raw_prices(RAW_GAS_CSV), "local CSV fallback"
+
+
 st.set_page_config(page_title="U.S. Gasoline Forecast", layout="wide")
 st.title("U.S. weekly retail gasoline — history & forecast")
 
@@ -146,11 +189,11 @@ _default_api_pipeline = sys.platform != "darwin"
 use_api_pipeline = st.sidebar.checkbox(
     "Run refresh through Flask API",
     value=_default_api_pipeline,
-    help="On Mac, leave unchecked unless you started the API with scripts/run_api.sh",
+    help="Controls refresh/training buttons only. The chart always tries to read history from Flask API first.",
 )
 
 if st.sidebar.button("Fetch EIA data & retrain models", type="primary"):
-    with st.spinner("Downloading from EIA and retraining XGBoost + SARIMA (may take 1–2 minutes)…"):
+    with st.spinner("Downloading from EIA and retraining the deployed XGBoost model…"):
         try:
             if use_api_pipeline:
                 resp = requests.post(
@@ -193,7 +236,7 @@ with col_p1:
         except Exception as exc:  # noqa: BLE001
             st.sidebar.error(str(exc))
 with col_p2:
-    if st.button("Train only", help="Retrain on existing CSV"):
+    if st.button("Train only", help="Retrain deployed XGBoost on the existing API CSV"):
         try:
             if use_api_pipeline:
                 r = requests.post(f"{api_url.rstrip('/')}/models/train", timeout=300)
@@ -221,32 +264,29 @@ show_events = st.sidebar.checkbox("News & shocks (U.S. + global)", value=True)
 show_peaks = st.sidebar.checkbox("Price peaks ▲", value=True)
 show_troughs = st.sidebar.checkbox("Price lows ▼", value=True)
 
-_meta_path = ROOT / "models" / "metadata.json"
-if _meta_path.exists():
-    _meta = json.loads(_meta_path.read_text(encoding="utf-8"))
-    _mm = _meta.get("models", {}).get(method_api, {})
-    if _mm:
-        st.sidebar.caption(
-            f"Holdout MAE ({forecast_method}): **{_mm.get('validation_mae', 0):.4f}** $/gal  \n"
-            f"Holdout RMSE: **{_mm.get('validation_rmse', 0):.4f}** $/gal"
-        )
-        if method_api == "sarima" and _mm.get("model_spec"):
-            st.sidebar.caption(f"Fitted: `{_mm['model_spec']}`")
+try:
+    _meta = _load_api_metadata(api_url)
+except Exception as exc:  # noqa: BLE001
+    st.sidebar.warning(f"Could not load API metadata: {exc}")
+    _meta = _load_local_metadata()
 
-if not RAW_GAS_CSV.exists():
-    st.warning(
-        "No local price file yet. Use **Fetch EIA data & retrain models** in the sidebar "
-        "(requires `EIA_API_KEY` in `.env` and the Flask API running if that box is checked)."
+_mm = _meta.get("models", {}).get(method_api, {})
+if _mm:
+    st.sidebar.caption(
+        f"Holdout MAE ({forecast_method}): **{_mm.get('validation_mae', 0):.4f}** $/gal  \n"
+        f"Holdout RMSE: **{_mm.get('validation_rmse', 0):.4f}** $/gal"
     )
-    st.stop()
+    if method_api == "sarima" and _mm.get("model_spec"):
+        st.sidebar.caption(f"Fitted: `{_mm['model_spec']}`")
 
-raw = load_raw_prices(RAW_GAS_CSV)
+raw, data_source_label = _load_display_history(api_url)
 
 col_a, col_b = st.columns(2)
 with col_a:
     st.metric("Latest observation", f"{raw['price'].iloc[-1]:.3f} $/gal")
 with col_b:
     st.metric("As of", str(raw["period"].iloc[-1].date()))
+st.caption(f"Historical data source: {data_source_label}")
 
 st.subheader("Historical series")
 st.plotly_chart(

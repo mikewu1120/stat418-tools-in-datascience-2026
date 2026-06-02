@@ -74,9 +74,10 @@ Rebuild images after you re-run `collect.py` / `train.py` so `data/` and `models
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/data/sources` | GET | JSON with EIA portal / register / docs URLs |
+| `/data/history` | GET | Historical gasoline series currently used by the API |
 | `/data/collect` | POST | Download latest weekly gasoline from EIA → `data/raw/gasoline_weekly.csv` |
-| `/models/train` | POST | Retrain XGBoost + SARIMA on current CSV |
-| `/pipeline/run` | POST | **Collect + train** in one step |
+| `/models/train` | POST | Retrain deployed XGBoost on current CSV; keep packaged SARIMA comparison |
+| `/pipeline/run` | POST | **Collect + retrain deployed XGBoost** in one step |
 
 `POST /predict`
 
