@@ -4,12 +4,12 @@ import joblib
 import pandas as pd
 import streamlit as st
 
+BASE_DIR = Path(__file__).parent
+
 st.set_page_config(
     page_title="Furniture Product Launch Advisor",
     layout="wide"
 )
-
-BASE_DIR = Path(__file__).parent
 
 model = joblib.load(BASE_DIR / "ikea_interest_model.pkl")
 data = pd.read_csv(BASE_DIR / "ikea_model_dataset.csv")
@@ -32,7 +32,7 @@ category = st.sidebar.selectbox(
 
 price = st.sidebar.number_input(
     "Planned price ($)",
-    min_value=0.0,
+    min_value=1.0,
     value=99.0,
     step=10.0
 )
@@ -60,8 +60,6 @@ detail_map = {
 }
 
 page_text_length = detail_map[detail_level]
-
-# Use a neutral name length because product name text is not a main user input here
 name_length = int(data["name_length"].median())
 
 input_df = pd.DataFrame([
@@ -175,6 +173,7 @@ for scenario, scenario_price in scenario_prices.items():
     scenario_df = input_df.copy()
     scenario_df["price"] = scenario_price
     scenario_prob = model.predict_proba(scenario_df)[0][1]
+
     scenario_rows.append({
         "Scenario": scenario,
         "Price": round(scenario_price, 2),
@@ -182,11 +181,48 @@ for scenario, scenario_price in scenario_prices.items():
     })
 
 scenario_df = pd.DataFrame(scenario_rows)
+
 st.dataframe(scenario_df, use_container_width=True)
 
 best_row = scenario_df.sort_values("Interest Score", ascending=False).iloc[0]
+
 st.write(
     f"Best scenario in this test: **{best_row['Scenario']}** with an interest score of **{best_row['Interest Score']}/100**."
+)
+
+st.divider()
+
+st.subheader("Price Sensitivity Analysis")
+
+price_points = [
+    max(1, price * 0.5),
+    price * 0.75,
+    price,
+    price * 1.25,
+    price * 1.5,
+]
+
+sensitivity_rows = []
+
+for test_price in price_points:
+    test_df = input_df.copy()
+    test_df["price"] = test_price
+
+    test_prob = model.predict_proba(test_df)[0][1]
+
+    sensitivity_rows.append({
+        "Price": round(test_price, 2),
+        "Interest Score": round(test_prob * 100, 1),
+    })
+
+sensitivity_df = pd.DataFrame(sensitivity_rows)
+
+st.line_chart(
+    sensitivity_df.set_index("Price")
+)
+
+st.write(
+    "This chart shows how the predicted interest score changes under different launch price assumptions."
 )
 
 st.divider()
