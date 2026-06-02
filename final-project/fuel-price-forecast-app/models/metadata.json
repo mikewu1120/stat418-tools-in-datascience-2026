@@ -1,0 +1,31 @@
+{
+  "last_data_period": "2026-05-18",
+  "feature_columns": [
+    "lag_1",
+    "lag_2",
+    "lag_4",
+    "lag_8",
+    "lag_52",
+    "month",
+    "weekofyear"
+  ],
+  "models": {
+    "xgboost": {
+      "method": "xgboost",
+      "holdout_weeks": 52,
+      "validation_mae": 0.057929875813997736,
+      "validation_rmse": 0.1003612625031066,
+      "n_train_rows": 1625,
+      "description": "Gradient boosted trees on lag + calendar features (recursive multi-step forecast)."
+    },
+    "sarima": {
+      "method": "sarima",
+      "model_spec": "SARIMA(1,1,1)(1,1,1,52)",
+      "holdout_weeks": 52,
+      "validation_mae": 0.2386221296328143,
+      "validation_rmse": 0.42172132940673207,
+      "n_train_rows": 1677,
+      "description": "Univariate SARIMA/ARIMA on weekly price (direct multi-step forecast)."
+    }
+  }
+}
