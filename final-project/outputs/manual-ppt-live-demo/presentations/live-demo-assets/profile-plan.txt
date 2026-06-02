@@ -1,7 +1,0 @@
-task mode: targeted-edit
-primary deck-profile: targeted-edit-media
-secondary gates: engineering-platform and course rubric alignment
-required proof objects: deployed Streamlit screenshot, deployed Flask API response evidence, 7-slide requirement check
-source/asset requirements: use screenshots from the live deployed app URL and live API response; preserve existing deck layout, notes, and slide count
-QA gates: slide 6 must show UI + API interaction, slide 1 links must stay clickable, deck must remain at 7 slides, rendered contact sheet must be visually readable
-known missing inputs: PowerPoint click-animation support is not exposed by artifact-tool, so any build animation requires a minimal OOXML post-processing step
